@@ -40,6 +40,16 @@ import us.kbase.kidl.KidlParseException;
 import us.kbase.kidl.KidlParser;
 
 public class KidlTest {
+	
+	/* TODO TEST many of these tests used to compare the output of the java type compiler with
+	 *           the Perl type compiler, which is long gone. As such, those lines have been
+	 *           commented out. They need to be updated to compare against expected structures,
+	 *           especially if any changes are to be made.
+	 *           Another, potentially better option is to update to the latest code in the kb_sdk
+	 *           repo, which has removed the need for the Perl type compiler, but see TODO.md in
+	 *           the repo root dir.
+	 *           For now they're just dumb happy path tests.
+	 */
 
 	private static File prepareWorkDir() throws IOException {
 		File tempDir = new File(".").getCanonicalFile();
@@ -264,19 +274,19 @@ public class KidlTest {
 				continue;
 			File workDir = prepareWorkDir();
 			File specFile = prepareSpec(workDir, tests[testNum]);
-			Map<String, Map<String, String>> schemas1 = new HashMap<String, Map<String, String>>();
-			Map<?,?> parse1 = KidlParser.parseSpecExt(specFile, workDir, schemas1, null);
+			//Map<String, Map<String, String>> schemas1 = new HashMap<String, Map<String, String>>();
+			//Map<?,?> parse1 = KidlParser.parseSpecExt(specFile, workDir, schemas1, null);
 			Map<String, Map<String, String>> schemas2 = new HashMap<String, Map<String, String>>();
+			@SuppressWarnings("unused")
 			Map<?,?> parse2 = KidlParser.parseSpecInt(specFile, schemas2);
-			ok = ok & compareJson(parse1, parse2, "Parsing result for test #" + (testNum + 1));
-			ok = ok & compareJsonSchemas(schemas1, schemas2, "Json schema for test #" + (testNum + 1));
+			//ok = ok & compareJson(parse1, parse2, "Parsing result for test #" + (testNum + 1));
+			//ok = ok & compareJsonSchemas(schemas1, schemas2, "Json schema for test #" + (testNum + 1));
 		}
 		Assert.assertTrue(ok);
 	}
 
 	@Test
 	public void testJsonSchemas2() throws Exception {
-		boolean ok = true;
 		for (int testNum = 1; testNum <= 22; testNum++) {
 			if (testNum == 9) {
 				continue;
@@ -284,25 +294,20 @@ public class KidlTest {
 			File workDir = prepareWorkDir();
 			InputStream is = this.getClass().getResourceAsStream("spec." + testNum + ".properties");
 			File specFile = prepareSpec(workDir, is);
-			try {
-				parseSpec(testNum, specFile, workDir);
-			} catch (Exception ex) {
-				ok = false;
-			}
+			parseSpec(testNum, specFile, workDir);
 		}
-		Assert.assertTrue(ok);
 	}
 
 	private List<KbService> parseSpec(int testNum, File specFile, File workDir)
 			throws KidlParseException, IOException, InterruptedException,
 			ParserConfigurationException, SAXException, Exception,
 			JsonGenerationException, JsonMappingException, JsonParseException {
-		Map<String, Map<String, String>> schemas1 = new HashMap<String, Map<String, String>>();
-		Map<?,?> parse1 = KidlParser.parseSpecExt(specFile, workDir, schemas1, null);
+		//Map<String, Map<String, String>> schemas1 = new HashMap<String, Map<String, String>>();
+		//Map<?,?> parse1 = KidlParser.parseSpecExt(specFile, workDir, schemas1, null);
 		Map<String, Map<String, String>> schemas2 = new HashMap<String, Map<String, String>>();
 		Map<?, ?> parse = KidlParser.parseSpecInt(specFile, schemas2);
-		Assert.assertTrue(compareJson(parse1, parse, "Parsing result for test #" + (testNum + 1)));
-		Assert.assertTrue(compareJsonSchemas(schemas1, schemas2, "Json schema for test #" + (testNum + 1)));
+		//Assert.assertTrue(compareJson(parse1, parse, "Parsing result for test #" + (testNum + 1)));
+		//Assert.assertTrue(compareJsonSchemas(schemas1, schemas2, "Json schema for test #" + (testNum + 1)));
 		return KidlParser.parseSpec(parse);
 	}
 
@@ -441,22 +446,9 @@ public class KidlTest {
 				"    float val2;\n" +
 				"  } my_struct;\n" +
 				"};");
-		List<KbService> srvList = KidlParser.parseSpec(specFile, workDir, null);
+		List<KbService> srvList = KidlParser.parseSpec(specFile, workDir, null, null, true);
 		KbModule module = getModule(srvList);
 		List<KbModuleComp> cmpList = module.getModuleComponents();
-		Assert.assertEquals(3, cmpList.size());
-		for (int i = 0; i < cmpList.size(); i++) {
-			Assert.assertEquals(KbTypedef.class, cmpList.get(i).getClass());
-			KbTypedef typedef = (KbTypedef)cmpList.get(i);
-			if (typedef.getName().endsWith("_ref")) {
-				String actualRefList = "" + typedef.getAnnotations().getIdReference().getAttributes();
-				String expectedRefList = typedef.getName().startsWith("full_") ? "[Test.my_struct]" : "[]";
-				Assert.assertEquals(expectedRefList, actualRefList);
-			}
-		}
-		srvList = KidlParser.parseSpec(specFile, workDir, null, null, true);
-		module = getModule(srvList);
-		cmpList = module.getModuleComponents();
 		Assert.assertEquals(3, cmpList.size());
 		for (int i = 0; i < cmpList.size(); i++) {
 			Assert.assertEquals(KbTypedef.class, cmpList.get(i).getClass());
@@ -477,7 +469,7 @@ public class KidlTest {
 				"  bebebe\n" +
 				"};");
 		try {
-			KidlParser.parseSpec(specFile, workDir, null);
+			KidlParser.parseSpec(specFile, workDir, null, null, true);
 			Assert.fail();
 		} catch (KidlParseException ex) {
 			Assert.assertTrue(ex.getMessage().contains("bebebe"));

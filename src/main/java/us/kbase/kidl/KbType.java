@@ -8,7 +8,6 @@ package us.kbase.kidl;
 public interface KbType {
 	/**
 	 * Method creates structure to save parsing structure of type in JSON.
-	 * @param oui defines details which is necessary in order to reproduce behavior of original perl parser.
 	 */
 	public Object toJson();
 	/**
