@@ -1,5 +1,10 @@
 package us.kbase.test.kidl;
 
+import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.nullValue;
+import static org.junit.Assert.assertThat;
+import static org.junit.Assert.fail;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -29,7 +34,10 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
+import us.kbase.jkidl.StaticIncludeProvider;
+import us.kbase.kidl.KbAnnotations;
 import us.kbase.kidl.KbModule;
+import us.kbase.kidl.KbModuleDef;
 import us.kbase.kidl.KbModuleComp;
 import us.kbase.kidl.KbService;
 import us.kbase.kidl.KbStruct;
@@ -40,27 +48,14 @@ import us.kbase.kidl.KidlParseException;
 import us.kbase.kidl.KidlParser;
 
 public class KidlTest {
-	
-	/* TODO TEST many of these tests used to compare the output of the java type compiler with
-	 *           the Perl type compiler, which is long gone. As such, those lines have been
-	 *           commented out. They need to be updated to compare against expected structures,
-	 *           especially if any changes are to be made.
-	 *           Another, potentially better option is to update to the latest code in the kb_sdk
-	 *           repo, which has removed the need for the Perl type compiler, but see TODO.md in
-	 *           the repo root dir.
-	 *           For now they're just dumb happy path tests.
-	 */
+    public static final String tempDirName = "temp_test";
 
-	private static File prepareWorkDir() throws IOException {
+	private static File prepareWorkDir() throws Exception {
 		File tempDir = new File(".").getCanonicalFile();
-		if (!tempDir.getName().equals("test")) {
-			tempDir = new File(tempDir, "test");
-			if (!tempDir.exists())
-				tempDir.mkdir();
-		}
 		File workDir = new File(tempDir, "test_kidl");
-		if (!workDir.exists())
+		if (!workDir.exists()) {
 			workDir.mkdir();
+		}
 		return workDir;
 	}
 
@@ -88,9 +83,11 @@ public class KidlTest {
 			origWidth = 100;
 		int maxSize = Math.max(origLn.size(), newLn.size());
 		for (int pos = 0; pos < maxSize; pos++) {
-			String origL = pos < origLn.size() ? origLn.get(pos) : "";
-			String newL = pos < newLn.size() ? newLn.get(pos) : "";
+			String origL = pos < origLn.size() ? origLn.get(pos) : "<no-data>";
+			String newL = pos < newLn.size() ? newLn.get(pos) : "<no-data>";
 			boolean eq = origL.equals(newL);
+			if (eq)
+			    continue;
 			if (origL.length() > origWidth) {
 				System.out.println("/" + (eq ? " " : "*") +origL);
 				System.out.println("\\" + (eq ? " " : "*") + newL);
@@ -101,6 +98,118 @@ public class KidlTest {
 				System.out.println(origL + new String(gap) + sep + newL);
 			}
 		}
+	}
+	
+	@Test
+	public void testDeprecation() throws Exception {
+		String spec = 	"module t1 {\n" +
+						"	/* @deprecated bar" +
+							"*/" +
+						"	typedef int foo;\n" +
+						"	typedef int foo2;\n" +
+						"};";
+		checkDeprecation(spec, "bar", true, null);
+		
+		spec = 	"module t1 {\n" +
+				"	/* @deprecated\n" +
+				"		sometext\n" +
+				"" +
+				" " +
+				"	*/" +
+				"	typedef int foo;\n" +
+				"	typedef int foo2;\n" +
+				"};";
+		checkDeprecation(spec, null, true, null);
+		
+		spec = 	"module t1 {\n" +
+				"	/* @deprecated baz\n" +
+				"		@wooble wibble" +
+				" " +
+				"" +
+				"	*/" +
+				"	funcdef whee() returns();\n" +
+				"	/* foo bar\n" +
+				" " +
+				"" +
+				"	*/" +
+				"	funcdef whee2() returns();\n" +
+				"};";
+		Map<String, Object> unknown = new HashMap<String, Object>();
+		unknown.put("wooble", Arrays.asList("wibble"));
+		checkDeprecation(spec, "baz", true, unknown);
+		
+		spec = 	"module t1 {\n" +
+				"	/* @deprecated bar baz" +
+					"*/" +
+				"	typedef int foo;\n" +
+				"};";
+		failDeprecation(spec,
+				"Error at line 2, column 53: deprecation annotations may have at most one argument");
+	}
+
+	private void failDeprecation(String spec, String exp) throws Exception {
+		try {
+			checkDeprecation(spec, "foo", true, null);
+			fail("compiled bad spec");
+		} catch (KidlParseException kpe) {
+			assertThat("incorrect exception msg", kpe.getLocalizedMessage(),
+					is(exp));
+		}
+	}
+
+	@SuppressWarnings("unchecked")
+	private void checkDeprecation(
+			final String spec,
+			final String deptarg,
+			final boolean isdep,
+			final Map<String, Object> unknown
+			) throws Exception {
+		Map<String, Map<String, String>> schemas =
+				new HashMap<String, Map<String, String>>();
+		final Map<String, Object> parsed = (Map<String, Object>) KidlParser.parseSpecInt(
+				new StringReader(spec), schemas, new StaticIncludeProvider()
+		);
+		final List<Map<String, Map<String, Object>>> modComps =
+				((List<List<Map<String, List<Map<String, Map<String, Object>>>>>>)parsed.get("t1"))
+				.get(0).get(0).get("module_components");
+		final Map<String, Object> annotations = modComps.get(0).get("annotations");
+		assertThat("incorrect deprecation",
+				annotations.containsKey("deprecated"), is(true));
+		if (deptarg != null) {
+			assertThat("incorrect deprecation target",
+					(String) annotations.get("deprecated"),
+					is(deptarg));
+		} else {
+			assertThat("incorrect deprecation target",
+					annotations.get("deprecated"), is(nullValue()));
+		}
+		if (unknown != null) {
+			Map<String, Object> uk = (Map<String, Object>) annotations.get("unknown_annotations");
+			assertThat("incorrect unknown annotations", uk, is(unknown));
+		}
+		final Map<String, Object> stdtarget = modComps.get(1).get("annotations");
+		assertThat("incorrect deprection", stdtarget.containsKey("deprecation"),
+				is(false));
+		List<KbService> reparsed = KidlParser.parseSpec(parsed);
+		KbAnnotations ann = getAnnotations(reparsed, 0);
+		assertThat("deprecation incorrect", ann.isDeprecated(), is(isdep));
+		assertThat("deprecation target incorrect",
+				ann.getDeprecationReplacement(), is(deptarg));
+		if (unknown != null) {
+			assertThat("incorrect unknown annotations",
+					ann.getUnknown(), is(unknown));
+		}
+		ann = getAnnotations(reparsed, 1);
+		assertThat("deprecation incorrect", ann.isDeprecated(), is(false));
+		assertThat("deprecation target incorrect",
+				ann.getDeprecationReplacement(), is((String)null));
+	}
+
+	private KbAnnotations getAnnotations(List<KbService> reparsed,
+			int compnum) {
+		final KbModuleComp td = reparsed.get(0).getModules().get(0)
+				.getModuleComponents().get(compnum);
+		return ((KbModuleDef)td).getAnnotations();
 	}
 	
 	@Test
@@ -259,55 +368,68 @@ public class KidlTest {
 				"  /* Real comment for type1 */\n" +
 				"  typedef string test1;\n" +
 				"};",
-				"module RefCount {" +
-				"/* @id ws */" +
-				"typedef string reference;" +
-				"/* @optional ref */" + 
-				"typedef structure {" +
-				"reference ref;" +
-				"} RefType;" +
+				"module Test15 {" +
+				"  /* @id ws */" +
+				"  typedef string reference;" +
+				"  /* @optional ref */" + 
+				"  typedef structure {" +
+				"    reference ref;" +
+				"  } RefType;" +
 				"};"
 		};
 		boolean ok = true;
 		for (int testNum = 0; testNum < tests.length; testNum++) {
-			if (testNum + 1 == 14)
-				continue;
 			File workDir = prepareWorkDir();
 			File specFile = prepareSpec(workDir, tests[testNum]);
-			//Map<String, Map<String, String>> schemas1 = new HashMap<String, Map<String, String>>();
-			//Map<?,?> parse1 = KidlParser.parseSpecExt(specFile, workDir, schemas1, null);
+			Map<?,?> parse1 = loadMapFromJsonResource("spec.i" + (testNum + 1));
 			Map<String, Map<String, String>> schemas2 = new HashMap<String, Map<String, String>>();
-			@SuppressWarnings("unused")
 			Map<?,?> parse2 = KidlParser.parseSpecInt(specFile, schemas2);
-			//ok = ok & compareJson(parse1, parse2, "Parsing result for test #" + (testNum + 1));
-			//ok = ok & compareJsonSchemas(schemas1, schemas2, "Json schema for test #" + (testNum + 1));
+			ok = ok & compareJson(parse1, parse2, "Parsing result for test #" + (testNum + 1));
 		}
 		Assert.assertTrue(ok);
 	}
 
+	public static List<Integer> getTestSpecNumbers() {
+	    List<Integer> ret = new ArrayList<Integer>();
+        for (int testNum = 1; testNum <= 22; testNum++) {
+            if (testNum == 9) {
+                continue;
+            }
+            ret.add(testNum);
+        }	
+        return ret;
+	}
+	
+	public static InputStream readTestSpec(int testNum) {
+	    return KidlTest.class.getResourceAsStream("spec." + testNum + ".properties");
+	}
+	
 	@Test
 	public void testJsonSchemas2() throws Exception {
-		for (int testNum = 1; testNum <= 22; testNum++) {
-			if (testNum == 9) {
-				continue;
-			}
+		boolean ok = true;
+		for (int testNum : getTestSpecNumbers()) {
 			File workDir = prepareWorkDir();
-			InputStream is = this.getClass().getResourceAsStream("spec." + testNum + ".properties");
+			InputStream is = readTestSpec(testNum);
 			File specFile = prepareSpec(workDir, is);
-			parseSpec(testNum, specFile, workDir);
+			try {
+				parseSpec(testNum, specFile, workDir);
+			} catch (Exception ex) {
+			    System.err.println("Error for test " + testNum);
+			    ex.printStackTrace();
+				ok = false;
+			}
 		}
+		Assert.assertTrue(ok);
 	}
 
 	private List<KbService> parseSpec(int testNum, File specFile, File workDir)
 			throws KidlParseException, IOException, InterruptedException,
 			ParserConfigurationException, SAXException, Exception,
 			JsonGenerationException, JsonMappingException, JsonParseException {
-		//Map<String, Map<String, String>> schemas1 = new HashMap<String, Map<String, String>>();
-		//Map<?,?> parse1 = KidlParser.parseSpecExt(specFile, workDir, schemas1, null);
+		Map<?,?> parse1 = loadMapFromJsonResource("spec." + testNum);
 		Map<String, Map<String, String>> schemas2 = new HashMap<String, Map<String, String>>();
 		Map<?, ?> parse = KidlParser.parseSpecInt(specFile, schemas2);
-		//Assert.assertTrue(compareJson(parse1, parse, "Parsing result for test #" + (testNum + 1)));
-		//Assert.assertTrue(compareJsonSchemas(schemas1, schemas2, "Json schema for test #" + (testNum + 1)));
+		Assert.assertTrue(compareJson(parse1, parse, "Parsing result for test #" + (testNum + 1)));
 		return KidlParser.parseSpec(parse);
 	}
 
@@ -364,6 +486,18 @@ public class KidlTest {
 		return mapper.writeValueAsString(schemaMap);
 	}
 	
+	@SuppressWarnings("unchecked")
+    private static Map<String, Object> loadMapFromJsonResource(String resourceName)
+	        throws JsonParseException, JsonMappingException, IOException {
+        ObjectMapper mapper = new ObjectMapper();
+        InputStream is = KidlTest.class.getResourceAsStream(resourceName + ".json.properties");
+        try {
+            return mapper.readValue(is, Map.class);
+        } finally {
+            is.close();
+        }
+	}
+	
 	private static String writeJson(Object obj) 
 			throws JsonGenerationException, JsonMappingException, IOException {
 		StringWriter sw = new StringWriter();
@@ -411,7 +545,7 @@ public class KidlTest {
 				"    float val2;\n" +
 				"  } my_struct;\n" +
 				"};");
-		List<KbService> srvList = parseSpec(0, specFile, workDir);
+		List<KbService> srvList = parseSpec(23, specFile, workDir);
 		KbModule module = getModule(srvList);
 		List<KbModuleComp> cmpList = module.getModuleComponents();
 		Assert.assertEquals(1, cmpList.size());
@@ -446,9 +580,9 @@ public class KidlTest {
 				"    float val2;\n" +
 				"  } my_struct;\n" +
 				"};");
-		List<KbService> srvList = KidlParser.parseSpec(specFile, workDir, null, null, true);
+		List<KbService> srvList = KidlParser.parseSpec(specFile, null);
 		KbModule module = getModule(srvList);
-		List<KbModuleComp> cmpList = module.getModuleComponents();
+		List<KbModuleComp>cmpList = module.getModuleComponents();
 		Assert.assertEquals(3, cmpList.size());
 		for (int i = 0; i < cmpList.size(); i++) {
 			Assert.assertEquals(KbTypedef.class, cmpList.get(i).getClass());
@@ -469,7 +603,7 @@ public class KidlTest {
 				"  bebebe\n" +
 				"};");
 		try {
-			KidlParser.parseSpec(specFile, workDir, null, null, true);
+			KidlParser.parseSpec(specFile, null);
 			Assert.fail();
 		} catch (KidlParseException ex) {
 			Assert.assertTrue(ex.getMessage().contains("bebebe"));
@@ -592,7 +726,7 @@ public class KidlTest {
 		for (int testNum = 0; testNum < specAndResult.length; testNum++) {
 			specFile = prepareSpec(workDir, specAndResult[testNum][0]);
 			try {
-				KidlParser.parseSpec(specFile, workDir, null, null, true);
+				KidlParser.parseSpec(specFile, null);
 				Assert.fail();
 			} catch (Exception ex) {
 				boolean expectedError = ex.getMessage().contains(specAndResult[testNum][1]);
@@ -602,6 +736,124 @@ public class KidlTest {
 						expectedError);
 			}
 		}
+        String[][] specAndResult2 = {
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int authentication;\n" +
+                        "  } test1;\n};",
+                        "AUTHENTICATION"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int required;\n" +
+                        "  } test1;\n};"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int optional;\n" +
+                        "  } test1;\n};"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int none;\n" +
+                        "  } test1;\n};"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int typedef;\n" +
+                        "  } test1;\n};",
+                        "TYPEDEF"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int funcdef;\n" +
+                        "  } test1;\n};",
+                        "FUNCDEF"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int string;\n" +
+                        "  } test1;\n};",
+                        "string"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int int;\n" +
+                        "  } test1;\n};",
+                        "int"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int float;\n" +
+                        "  } test1;\n};",
+                        "float"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int UnspecifiedObject;\n" +
+                        "  } test1;\n};",
+                        "UnspecifiedObject"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int list;\n" +
+                        "  } test1;\n};",
+                        "LIST"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int mapping;\n" +
+                        "  } test1;\n};",
+                        "MAPPING"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int structure;\n" +
+                        "  } test1;\n};",
+                        "STRUCTURE"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int tuple;\n" +
+                        "  } test1;\n};",
+                        "TUPLE"
+                },
+                { "" +
+                        "module Test {\n typedef structure {\n" +
+                        "    int returns;\n" +
+                        "  } test1;\n};",
+                        "RETURNS"
+                },
+                { "" +
+                        "module Test {\n" +
+                        "    typedef int type1;\n" +
+                        "    typedef int type1;\n" +
+                        "};",
+                        "Type type1 was already declared"
+                },
+                { "" +
+                        "module Test {\n" +
+                        "    funcdef func1 () returns ();\n" +
+                        "    funcdef func1 () returns ();\n" +
+                        "};",
+                        "Function func1 was already declared"
+                }
+        };
+        for (int testNum = 0; testNum < specAndResult2.length; testNum++) {
+            specFile = prepareSpec(workDir, specAndResult2[testNum][0]);
+            try {
+                KidlParser.parseSpec(specFile, null);
+                if (specAndResult2[testNum].length > 1)
+                    Assert.fail("Good for case: " + specAndResult2[testNum][0]);
+            } catch (Exception ex) {
+                boolean expectedError = ex.getMessage().toLowerCase().contains(
+                        specAndResult2[testNum][1].toLowerCase());
+                if (!expectedError)
+                    ex.printStackTrace();
+                Assert.assertTrue("Actual message for test #" + (testNum + 1) + ": " + ex.getMessage(), 
+                        expectedError);
+            }
+        }
 	}
 	
 	@Test
@@ -611,7 +863,7 @@ public class KidlTest {
 				"module Test {\n" +
 				"  typedef tuple<string fid, string fid, string fid> t;\n" +
 				"};");
-		List<KbService> srvList = parseSpec(0, specFile, workDir);
+		List<KbService> srvList = parseSpec(24, specFile, workDir);
 		KbModule module = getModule(srvList);
 		List<KbModuleComp> cmpList = module.getModuleComponents();
 		Assert.assertEquals(1, cmpList.size());
@@ -631,7 +883,7 @@ public class KidlTest {
 				"module Test {\n" +
 				"  typedef tuple<string, string, string> t;\n" +
 				"};");
-		List<KbService> srvList = parseSpec(0, specFile, workDir);
+		List<KbService> srvList = parseSpec(25, specFile, workDir);
 		KbModule module = getModule(srvList);
 		List<KbModuleComp> cmpList = module.getModuleComponents();
 		Assert.assertEquals(1, cmpList.size());

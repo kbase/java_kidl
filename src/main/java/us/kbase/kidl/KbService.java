@@ -46,4 +46,18 @@ public class KbService {
 	public List<KbModule> getModules() {
 		return modules;
 	}
+	
+	/* (non-Javadoc)
+	 * @see java.lang.Object#toString()
+	 */
+	@Override
+	public String toString() {
+		StringBuilder builder = new StringBuilder();
+		builder.append("KbService [name=");
+		builder.append(name);
+		builder.append(", modules=");
+		builder.append(modules);
+		builder.append("]");
+		return builder.toString();
+	}
 }

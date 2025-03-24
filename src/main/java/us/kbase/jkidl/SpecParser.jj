@@ -31,6 +31,7 @@ import us.kbase.kidl.KbTuple;
 import us.kbase.kidl.KbType;
 import us.kbase.kidl.KbTypedef;
 import us.kbase.kidl.KbUnspecifiedObject;
+import us.kbase.kidl.JSONableVisitor;
 import us.kbase.kidl.KidlParseException;
 
 /**
@@ -75,7 +76,7 @@ public class SpecParser {
                         modList = new ArrayList<Object>();
                         ret.put(module.getServiceName(), modList);
                 }
-                modList.add(module.toJson());
+                modList.add(module.accept(new JSONableVisitor()));
         }
         return ret;
     }
@@ -236,6 +237,22 @@ Map<String, KbModule> ModuleList(Map<String, KbModule> includes):
   { return ret; }
 }
 
+Token Identifier():
+{
+  Token ret = null;
+}
+{ (
+    ( ret = <S_IDENTIFIER> ) 
+    | 
+    ( ret = "required" ) 
+    |
+    ( ret = "optional" ) 
+    |
+    ( ret = "none" )
+  )
+  { return ret; }
+}
+
 /**
  * Method parses one module. So it iterates over module components (typedefs, funcdefs and auths).
  * They are separated by semicolon.
@@ -255,11 +272,11 @@ KbModule Module(Map<String, KbModule> includes):
 	comment = getLastComment(first);
   }
   [
-    LOOKAHEAD (<S_IDENTIFIER> ":")
-    srvToken = <S_IDENTIFIER>
+    LOOKAHEAD (Identifier() ":")
+    srvToken = Identifier()
     ":"
   ]
-  nameToken = <S_IDENTIFIER>
+  nameToken = Identifier()
   { ret = new KbModule(srvToken == null ? null : srvToken.toString(), nameToken.toString(), comment); }
   "{"
   (
@@ -276,8 +293,13 @@ KbModule Module(Map<String, KbModule> includes):
 	)
 	";"
     {
-      lastComment.set(null);
-      ret.addModuleComponent(comp);
+      if (!(comp instanceof KbAuthdef))
+          lastComment.set(null);
+      try {
+          ret.addModuleComponent(comp);
+      } catch (KidlParseException ex) {
+          generateParseException(ex);
+      }
     }  )*
   "}"
   ";"  { return ret; }
@@ -300,7 +322,7 @@ KbTypedef Typedef(KbModule curModule, Map<String, KbModule> includes):
 	comment = getLastComment(first);
   }
   type = Type(curModule, includes)
-  name = <S_IDENTIFIER>
+  name = Identifier()
   { 
   	try {
 	  	return new KbTypedef(curModule.getModuleName(), name.toString(), type, comment); 
@@ -350,8 +372,8 @@ KbType Type(KbModule curModule, Map<String, KbModule> includes):
       { ret = new KbList(subType); }
     )
   	|
-  	(  	  t = "mapping" "<" subType = Type(curModule, includes) [<S_IDENTIFIER>] "," 
-  	  subType2 = Type(curModule, includes) [<S_IDENTIFIER>] ">"
+  	(  	  t = "mapping" "<" subType = Type(curModule, includes) [Identifier()] "," 
+  	  subType2 = Type(curModule, includes) [Identifier()] ">"
       { ret = new KbMapping(subType, subType2); }
   	)
   	|
@@ -380,11 +402,11 @@ KbType Type(KbModule curModule, Map<String, KbModule> includes):
 	|
 	(
 	  [
-    	LOOKAHEAD (<S_IDENTIFIER> ".")
-    	moduleToken = <S_IDENTIFIER>
+    	LOOKAHEAD (Identifier() ".")
+    	moduleToken = Identifier()
     	"."
   	  ]
-	  typeToken = <S_IDENTIFIER>
+	  typeToken = Identifier()
 	)
   )  {
     if (ret == null) {
@@ -417,7 +439,7 @@ KbStructItem StructItem(KbModule curModule, Map<String, KbModule> includes):
 }
 {
   type = Type(curModule, includes)
-  name = <S_IDENTIFIER>
+  name = Identifier()
   { return new KbStructItem(type, name.toString()); }
 }
 
@@ -460,9 +482,14 @@ KbFuncdef Funcdef(KbModule curModule, Map<String, KbModule> includes):
   {
 	comment = getLastComment(first);
   }
-  name = <S_IDENTIFIER>
+  name = Identifier()
   "("
-  { ret = new KbFuncdef(name.toString(), comment); }
+  { try {
+	  	ret = new KbFuncdef(name.toString(), comment); 
+	} catch (KidlParseException ex) {
+		generateParseException(ex);
+	}
+  }
   args = OptNameParams(curModule, includes)
   { ret.getParameters().addAll(args); }
   ")"
@@ -509,7 +536,7 @@ KbParameter OptNameParam(KbModule curModule, Map<String, KbModule> includes):
 }
 {
   type = Type(curModule, includes)
-  [ nameToken = <S_IDENTIFIER>
+  [ nameToken = Identifier()
     { name = nameToken.toString(); }
   ]
   { return new KbParameter(type, name); }
