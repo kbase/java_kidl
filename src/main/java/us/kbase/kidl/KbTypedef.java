@@ -2,13 +2,12 @@ package us.kbase.kidl;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.TreeMap;
 
 /**
  * Class represents type definition (or named type) in spec-file.
  * @author rsutormin
  */
-public class KbTypedef implements KbModuleComp, KbType {
+public class KbTypedef implements KbType, KbModuleDef {
 	private String name;
 	private String module;
 	private KbType aliasType;
@@ -45,13 +44,18 @@ public class KbTypedef implements KbModuleComp, KbType {
 		module = Utils.prop(data, "module");
 		comment = Utils.prop(data, "comment");
 		annotations = new KbAnnotations();
-		if (data.containsKey("annotations"))
+		if (data.containsKey("annotations")) {
 			annotations.loadFromMap(Utils.propMap(data, "annotations"));
+		}
 		aliasType = Utils.createTypeFromMap(Utils.propMap(data, "alias_type"), annotations);
 		this.data = data;
 		return this;
 	}
 	
+	/* (non-Javadoc)
+	 * @see us.kbase.kidl.KbModuleDef#getName()
+	 */
+	@Override
 	public String getName() {
 		return name;
 	}
@@ -60,6 +64,10 @@ public class KbTypedef implements KbModuleComp, KbType {
 		return module;
 	}
 	
+	/* (non-Javadoc)
+	 * @see us.kbase.kidl.KbModuleDef#getComment()
+	 */
+	@Override
 	public String getComment() {
 		return comment;
 	}
@@ -68,36 +76,61 @@ public class KbTypedef implements KbModuleComp, KbType {
 		return aliasType;
 	}
 	
+	/* (non-Javadoc)
+	 * @see us.kbase.kidl.KbModuleDef#getData()
+	 */
+	@Override
 	public Map<?, ?> getData() {
 		return data;
 	}
 	
+	/* (non-Javadoc)
+	 * @see java.lang.Object#toString()
+	 */
 	@Override
 	public String toString() {
-		return module + "." + name;
+		StringBuilder builder = new StringBuilder();
+		builder.append("KbTypedef [name=");
+		builder.append(name);
+		builder.append(", module=");
+		builder.append(module);
+		builder.append(", aliasType=");
+		builder.append(aliasType);
+		builder.append(", comment=");
+		builder.append(comment);
+		builder.append(", data=");
+		builder.append(data);
+		builder.append(", annotations=");
+		builder.append(annotations);
+		builder.append("]");
+		return builder.toString();
 	}
 	
 	@Override
 	public int hashCode() {
-		return toString().hashCode();
+		return getSpecName().hashCode();
 	}
 	
+	@Override
+	public boolean equals(Object obj) {
+		return obj != null &&
+				(obj instanceof KbTypedef) &&
+				getSpecName().equals(((KbTypedef)obj).getSpecName());
+	}
+	
+	/* (non-Javadoc)
+	 * @see us.kbase.kidl.KbModuleDef#getAnnotations()
+	 */
+	@Override
 	public KbAnnotations getAnnotations() {
 		return annotations;
 	}
 	
 	@Override
-	public Object toJson() {
-		Map<String, Object> ret = new TreeMap<String, Object>();
-		ret.put("!", "Bio::KBase::KIDL::KBT::Typedef");
-		ret.put("alias_type", aliasType.toJson());
-		ret.put("annotations", annotations.toJson(true));
-		ret.put("comment", comment);
-		ret.put("module", module);
-		ret.put("name", name);
-		return ret;
+	public <T> T accept(final KidlVisitor<T> visitor, final KidlNode parent) {
+		return visitor.visit(this, parent, aliasType.accept(visitor, this));
 	}
-
+	
 	@SuppressWarnings("unchecked")
 	@Override
 	public Object toJsonSchema(boolean inner) {
@@ -115,5 +148,10 @@ public class KbTypedef implements KbModuleComp, KbType {
 	@Override
 	public void afterCreation() {
 		// Default implementation - just do nothing
+	}
+
+	@Override
+	public String getSpecName() {
+		return module + "." + name;
 	}
 }
