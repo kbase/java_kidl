@@ -3,23 +3,24 @@ package us.kbase.kidl;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.TreeMap;
 
 /**
  * Class represents module in spec file. It consists of 3 blocks in parsing structure:
  * properties, type info, name to type map.
  */
-public class KbModule {
+public class KbModule implements KidlNode {
 	private String moduleName;
 	private String serviceName;
 	private String comment;
 	private List<String> options;
 	private List<KbModuleComp> moduleComponents;
-	private List<KbTypeInfo> typeInfoList;
 	private Map<String, KbType> nameToType;
-	private KbAnnotations annotations;
+    private Map<String, KbFuncdef> nameToFuncdef;
 	private String lastAuthTempMode = "none";
 	private List<?> data = null;
 	
@@ -32,52 +33,53 @@ public class KbModule {
 		this.comment = comment == null ? "" : comment;
 		this.options = new ArrayList<String>();
 		this.moduleComponents = new ArrayList<KbModuleComp>();
-		this.typeInfoList = new ArrayList<KbTypeInfo>();
 		this.nameToType = new LinkedHashMap<String, KbType>();
 		nameToType.put("int", new KbScalar("int"));
 		nameToType.put("float", new KbScalar("float"));
 		nameToType.put("string", new KbScalar("string"));
 		nameToType.put("UnspecifiedObject", new KbUnspecifiedObject());
-		annotations = new KbAnnotations();
+        this.nameToFuncdef = new LinkedHashMap<String, KbFuncdef>();
 	}
 	
-	public void addModuleComponent(KbModuleComp comp) {
+	public void addModuleComponent(KbModuleComp comp) throws KidlParseException {
 		moduleComponents.add(comp);
 		if (comp instanceof KbAuthdef) {
 			lastAuthTempMode = ((KbAuthdef)comp).getType();
 		} else if (comp instanceof KbTypedef) {
 			KbTypedef typeDef = (KbTypedef)comp;
+			if (nameToType.containsKey(typeDef.getName()))
+			    throw new KidlParseException("Type " + typeDef.getName() + 
+			            " was already declared");
 			nameToType.put(typeDef.getName(), typeDef);
-		} else if (lastAuthTempMode != null) {
-			KbFuncdef func = (KbFuncdef)comp;
-			if (func.getAuthentication() == null)
+		} else {
+            KbFuncdef func = (KbFuncdef)comp;
+            if (nameToFuncdef.containsKey(func.getName()))
+                throw new KidlParseException("Function " + func.getName() + 
+                        " was already declared");
+            nameToFuncdef.put(func.getName(), func);
+		    if (lastAuthTempMode != null && func.getAuthentication() == null)
 				func.setAuthentication(lastAuthTempMode);
 		}
 	}
 	
-	public Object toJson() {
-		List<Object> ret = new ArrayList<Object>();
-		Map<String, Object> main = new TreeMap<String, Object>();
-		main.put("!", "Bio::KBase::KIDL::KBT::DefineModule");
-		main.put("annotations", annotations.toJson(false));
-		if (comment != null)
-			main.put("comment", comment);
-		List<Object> comps = new ArrayList<Object>();
-		for (KbModuleComp comp : moduleComponents)
-			comps.add(comp.toJson());
-		main.put("module_components", comps);
-		main.put("module_name", moduleName);
-		main.put("options", options);
-		main.put("service_name", serviceName);
-		ret.add(main);
-		ret.add(new ArrayList<Object>());
-		Map<String, Object> thirdPart = new TreeMap<String, Object>();
-		for (Map.Entry<String, KbType> entry : nameToType.entrySet())
-			thirdPart.put(entry.getKey(), entry.getValue().toJson());
-		ret.add(thirdPart);
-		return ret;
+	public <T> T accept(final KidlVisitor<T> visitor) {
+		return accept(visitor, null);
 	}
 	
+	@Override
+	public <T> T accept(final KidlVisitor<T> visitor, final KidlNode parent) {
+		final List<T> components = new LinkedList<T>();
+		for (final KbModuleComp c: moduleComponents) {
+			components.add(c.accept(visitor, this));
+		}
+		final Map<String, T> typeMap = new TreeMap<String, T>();
+		for (final Entry<String, KbType> entry: nameToType.entrySet()) {
+			typeMap.put(entry.getKey(),
+					entry.getValue().accept(visitor, this));
+		}
+		return visitor.visit(this, components, typeMap);
+	}
+
 	public void loadFromList(List<?> data) throws KidlParseException {
 		this.data = data;
 		if (data.size() != 3)
@@ -91,32 +93,32 @@ public class KbModule {
 		moduleComponents = new ArrayList<KbModuleComp>();
 		List<?> compList = Utils.propList(props, "module_components");
 		String defaultAuth = null;
+        nameToFuncdef = new LinkedHashMap<String, KbFuncdef>();
 		for (Object item : compList) {
 			if (!Map.class.isInstance(item)) {
 				if (item instanceof String) {
-					defaultAuth = (String)item;
+					defaultAuth = ((String)item).replace("auth_default", "");
+					moduleComponents.add(new KbAuthdef(defaultAuth));
 				} else {
 					throw new KidlParseException("List item is not compatible with type " +
 							"[" + Map.class.getName() + "], it has type: " + item.getClass().getName());
 				}
 			} else {
+				@SuppressWarnings("rawtypes")
 				Map<?,?> compProps = (Map)item;
 				String compType = Utils.getPerlSimpleType(compProps);
 				if (compType.equals("Typedef")) {
 					moduleComponents.add(new KbTypedef().loadFromMap(compProps));
 				} else if (compType.equals("Funcdef")) {
-					moduleComponents.add(new KbFuncdef().loadFromMap(compProps, defaultAuth));
+				    KbFuncdef func = new KbFuncdef().loadFromMap(compProps, defaultAuth);
+					moduleComponents.add(func);
+					nameToFuncdef.put(func.getName(), func);
 				} else {
 					throw new KidlParseException("Unknown module component type: " + compType);
 				}
 			}
 		}
 		moduleComponents = Collections.unmodifiableList(moduleComponents);
-		typeInfoList = new ArrayList<KbTypeInfo>();
-		for (Map<?,?> infoProps : Utils.repareTypingMap((List<?>)data.get(1))) {
-			typeInfoList.add(new KbTypeInfo().loadFromMap(infoProps));
-		}
-		typeInfoList = Collections.unmodifiableList(typeInfoList);
 		Map<?,?> typeMap = (Map<?,?>)data.get(2);
 		nameToType = new LinkedHashMap<String, KbType>();
 		for (Object key : typeMap.keySet()) {
@@ -147,15 +149,37 @@ public class KbModule {
 		return moduleComponents;
 	}
 	
-	public List<KbTypeInfo> getTypeInfoList() {
-		return typeInfoList;
-	}
-	
 	public Map<String, KbType> getNameToType() {
 		return nameToType;
 	}
 	
 	public List<?> getData() {
 		return data;
+	}
+
+	/* (non-Javadoc)
+	 * @see java.lang.Object#toString()
+	 */
+	@Override
+	public String toString() {
+		StringBuilder builder = new StringBuilder();
+		builder.append("KbModule [moduleName=");
+		builder.append(moduleName);
+		builder.append(", serviceName=");
+		builder.append(serviceName);
+		builder.append(", comment=");
+		builder.append(comment);
+		builder.append(", options=");
+		builder.append(options);
+		builder.append(", moduleComponents=");
+		builder.append(moduleComponents);
+		builder.append(", nameToType=");
+		builder.append(nameToType);
+		builder.append(", lastAuthTempMode=");
+		builder.append(lastAuthTempMode);
+		builder.append(", data=");
+		builder.append(data);
+		builder.append("]");
+		return builder.toString();
 	}
 }

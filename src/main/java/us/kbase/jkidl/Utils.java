@@ -22,25 +22,30 @@ public class Utils {
 			}
 		sb = sb2;
 		int base = 0;
-		BufferedReader br = new BufferedReader(new StringReader(sb.toString()));
-		sb = new StringBuilder();
-		try {
-			for (int lineNum = 0;; lineNum++) {
-				String l = br.readLine();
-				if (l == null)
-					break;
-				if (lineNum == 1)
-					while (base < l.length() && l.charAt(base) == ' ')
-						base++;
-				if (l.length() >= base && l.substring(0, base).trim().length() == 0)
-					l = l.substring(base);
-				sb.append(l).append('\n');
-			}
-			br.close();
-		} catch (IOException ex) {
-			throw new IllegalStateException("Unexpected error", ex);
-		}
-		while (sb.length() > 0) {
+        BufferedReader br = new BufferedReader(new StringReader(sb.toString()));
+        sb = new StringBuilder();
+        try {
+            for (int lineNum = 0;; lineNum++) {
+                String l = br.readLine();
+                if (l == null)
+                    break;
+                if (lineNum == 1)
+                    while (base < l.length() && l.charAt(base) == ' ')
+                        base++;
+                if (l.length() >= base && l.substring(0, base).trim().length() == 0)
+                    l = l.substring(base);
+                sb.append(l).append('\n');
+            }
+            br.close();
+        } catch (IOException ex) {
+            throw new IllegalStateException("Unexpected error", ex);
+        }
+		trimWhitespaces(sb);
+		return sb.toString();
+	}
+
+    public static void trimWhitespaces(StringBuilder sb) {
+        while (sb.length() > 0) {
 			char ch = sb.charAt(0);
 			if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
 				sb.delete(0, 1);
@@ -56,6 +61,5 @@ public class Utils {
 				break;
 			}
 		}
-		return sb.toString();
-	}
+    }
 }
